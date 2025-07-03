@@ -1,0 +1,19 @@
+vm_deployment_demo/
+├── ansible.cfg
+├── inventory/
+│   └── hosts
+├── group_vars/
+│   └── all.yml
+├── roles/
+│   └── vm_deploy/
+│       ├── tasks/
+│       │   └── main.yml
+│       ├── templates/
+│       │   └── vm.xml.j2
+│       └── defaults/
+│           └── main.yml
+├── qcow2_images/
+│   └── centos7.qcow2
+├── playbook.yml
+└── README.md
+

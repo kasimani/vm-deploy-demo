@@ -1,0 +1,18 @@
+deployer_qcow2_image: "NSP_RHEL8_23_11.qcow2"
+deployer_vm_interface: enp1s0
+deployer_vm_ip: 192.168.23.10
+deployer_vm_prefix: 24
+deployer_vm_gateway: 192.168.23.1
+qcow2_image_src_dir: "/home/qcow2images"
+qcow2_image_dst_dir: "/home/images"
+vm_name: "Deployer-VM"
+user_ssh_pub_key: ~/.ssh/id_rsa.pub
+vm_cpu: 4
+vm_ram: 8912
+vm_bridge: br0
+vm_network: "default"
+target_server: 10.58.8.5
+target_server_username: root
+libvirt_user: qemu
+libvirt_group: qemu
+

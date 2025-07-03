@@ -1,0 +1,12 @@
+- name: Playbook example
+  hosts: localhost
+#  vars:
+#    skip_specific_tasks: true
+
+  tasks:
+  - name: Task to potentially skip
+    command: echo "This task might be skipped"
+    when: not (skip_specific_tasks | bool)
+
+  - name: Task that always runs
+    command: echo "This task will always run"

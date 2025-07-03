@@ -1,0 +1,16 @@
+- name: Example playbook with tags
+  hosts: localhost
+  tasks:
+  - name: Task - No Tags
+    command: echo "No Tags"
+
+  - name: Task with Tag - Always
+    command: echo "With tags - Always run, regardless of the tags specified on the command line"
+    tags:
+      - always
+
+  - name: Task with Tag - Never
+    command: echo "Will never be executed, unless explicitly specified on the command line"
+    tags:
+      - never
+

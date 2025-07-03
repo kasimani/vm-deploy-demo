@@ -1,0 +1,9 @@
+qcow2_image: "centos7.qcow2"
+qcow2_image_src_dir: "./qcow2_images"
+qcow2_image_dst_dir: "/var/lib/libvirt/images"
+vm_name: "demo-vm1"
+vm_cpu: 2
+vm_ram: 2048  # MB
+vm_disk_size: 10G
+vm_network: "default"
+

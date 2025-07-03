@@ -1,0 +1,3 @@
+libvirt_pool: default
+vm_disk_format: qcow2
+

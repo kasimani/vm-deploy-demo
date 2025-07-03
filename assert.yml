@@ -1,0 +1,11 @@
+- name: Assert example
+  hosts: localhost
+  vars:
+    required_variable: ""
+  tasks:
+  - name: Assert variable is defined
+    assert:
+      that:
+        - required_variable != ""
+      fail_msg: "required_variable is not defined or is empty"
+      success_msg: "required_variable is defined and not empty"

@@ -1,0 +1,9 @@
+- name: Block example with fail
+  hosts: localhost
+  tasks:
+  - name: Block of tasks
+    block:
+    - name: Task 1
+      command: echo "Task 1"
+    - name: Task 2
+      command: /bin/false  # This task will fail

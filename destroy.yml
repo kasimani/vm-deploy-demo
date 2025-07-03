@@ -1,0 +1,5 @@
+- name: Destroy Deployer VM
+  shell: |
+    virsh destroy {{ vm_name }} || true
+    virsh undefine {{ vm_name }} --remove-all-storage || true
+

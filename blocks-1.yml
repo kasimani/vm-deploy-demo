@@ -1,0 +1,17 @@
+- name: Block example with fail
+  hosts: localhost
+  tasks:
+  - name: Block of tasks
+    block:
+    - name: Task 1
+      command: echo "Task 1"
+    - name: Task 2
+      command: /bin/false  # This task will fail
+    rescue:
+    - name: Handle error
+      debug:
+        msg: "An error occurred"
+    always:
+    - name: Always run this task
+      debug:
+        msg: "This task always runs"
