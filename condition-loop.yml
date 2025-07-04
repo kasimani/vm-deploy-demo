@@ -1,0 +1,19 @@
+- name: Conditional loop example
+  hosts: localhost
+  become: true
+  vars:
+    packages:
+      - name: nginx
+        install: true
+      - name: apache2
+        install: false
+      - name: mysql-server
+        install: true
+
+  tasks:
+    - name: Install selected packages
+      dnf:
+        name: "{{ item.name }}"
+        state: present
+      loop: "{{ packages }}"
+      when: item.install == true

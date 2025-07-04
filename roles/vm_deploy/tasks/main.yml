@@ -1,137 +1,140 @@
-- name: Ensure destination directory exists
-  file:
-    path: "{{ qcow2_image_dst_dir }}"
-    state: directory
-    mode: '0755'
+- name: Query Target Server facts
+  action: setup
+  remote_user: "{{ target_server_username }}"
+  delegate_to: "{{ target_server }}"
 
-- name: Create libvirt image directory
-  file:
-    path: "{{ qcow2_image_dst_dir }}/{{ vm_name }}/"
-    state: directory
-    owner: "{{ libvirt_user }}"
-    group: "{{ libvirt_group }}"
-    mode: '0755'
-        
-- name: Check if QCOW2 image already exists
-  stat:
-    path: "{{ qcow2_image_dst_dir }}/{{ vm_name }}/{{ vm_name }}.qcow2"
-  register: qcow2_image_stat
+- block:
+  - name: Ensure destination directory exists
+    file:
+      path: "{{ qcow2_image_dst_dir }}"
+      state: directory
+      mode: '0755'
+      recurse: yes
+  
+  - name: Create /home/images directory
+    file:
+      path: "{{ qcow2_image_dst_dir }}/{{ vm_name }}/"
+      state: directory
+      owner: "{{ libvirt_user }}"
+      group: "{{ libvirt_group }}"
+      mode: '0755'
+  
+  - name: Check if QCOW2 image already exists
+    stat:
+      path: "{{ qcow2_image_dst_dir }}/{{ vm_name }}/{{ vm_name }}.qcow2"
+    register: qcow2_image_stat
+  
+  - name: Copy QCOW2 image to hypervisor
+    copy:
+      src: "{{ qcow2_image_src_dir }}/{{ deployer_qcow2_image }}"
+      dest: "{{ qcow2_image_dst_dir }}/{{ vm_name }}/{{ vm_name }}.qcow2"
+      remote_src: yes
+      owner: "{{ libvirt_user }}"
+      group: "{{ libvirt_group }}"    
+    when: not qcow2_image_stat.stat.exists
+  
+  - name: Debug skipping message if QCOW2 exists
+    debug:
+      msg: "Skipping copy — QCOW2 image already exists."
+    when: qcow2_image_stat.stat.exists
 
-- name: Copy QCOW2 image to hypervisor
-  copy:
-    src: "{{ qcow2_image_src_dir }}/{{ deployer_qcow2_image }}"
-    dest: "{{ qcow2_image_dst_dir }}/{{ vm_name }}/{{ vm_name }}.qcow2"
-    owner: "{{ libvirt_user }}"
-    group: "{{ libvirt_group }}"
-  when: not qcow2_image_stat.stat.exists
+  - name: Set local variable in guestfish destination
+    set_fact:
+      guestfish_dest: "{{ qcow2_image_dst_dir }}/{{ vm_name }}/{{ vm_name }}.qcow2"
+  
+  - name: Get the public key for the current user
+    local_action: command cat "{{ user_ssh_pub_key }}"
+    register: current_user_ssh_key
+  
+  - name: Get list of partitions
+    shell: "guestfish -r -a {{ guestfish_dest }} run : list-filesystems | grep -Ev '(unknown|swap)'"
+    register: partitions_list
+  
+  - name: Check partition content
+    shell: "guestfish -r -a {{ guestfish_dest }} run : mount {{ item.split(':')[0] }} / : ls /"
+    register: partitions
+    with_items: "{{ partitions_list.stdout_lines }}"
+  
+  - name: Find root partition
+    set_fact:
+      guestfish_mount: "{{ item.item.split(':')[0]}}"
+    with_items: "{{ partitions.results }}"
+    when: '"proc" in item.stdout'
+  
+  - name: Set persistent interface name via udev rule using guestfish
+    shell: |
+      guestfish --rw -a {{ guestfish_dest }} -i <<EOF
+      mkdir-p /etc/udev/rules.d
+      write /etc/udev/rules.d/76-custom-net.rules 'SUBSYSTEM=="net", ACTION=="add", NAME="enp1s0"'
+      EOF
+  
+  - name: Create a temporary copy of the network script for {{ deployer_vm_interface }}
+    template: src=ifcfg-{{ deployer_vm_interface }}.j2 backup=no dest={{ qcow2_image_dst_dir }}/{{ vm_name }}/ifcfg-{{ deployer_vm_interface }}
+  
+  - name: Copy {{ deployer_vm_interface }} network script file
+    command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} copy-in {{ qcow2_image_dst_dir }}/{{ vm_name }}/ifcfg-{{ deployer_vm_interface }} /etc/sysconfig/network-scripts/
+  
+  - name: Remove temporary copy of {{ deployer_vm_interface }} network script
+    file: path={{ qcow2_image_dst_dir }}/{{ vm_name }}/ifcfg-{{ deployer_vm_interface }} state=absent
+  
+  - name: Set the owner and group on the {{ deployer_vm_interface }} network script file
+    command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} chown 0 0 /etc/sysconfig/network-scripts/ifcfg-{{ deployer_vm_interface }}
+  
+  - name: Create a temporary copy of the syscfg network file
+    template: src=network.j2 backup=no dest={{ qcow2_image_dst_dir }}/{{ vm_name }}/network
+  
+  - name: Copy network file to the deployer image
+    command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} copy-in {{ qcow2_image_dst_dir }}/{{ vm_name }}/network /etc/sysconfig/
+  
+  - name: Remove temporary copy of network file
+    file: path={{ qcow2_image_dst_dir }}/{{ vm_name }}/network state=absent
+  
+  - name: Set the owner and group for the network hostname file
+    command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} chown 0 0 /etc/sysconfig/network
+  
+  - name: Create a temporary copy of the hostname file
+    template: src=hostname.j2 backup=no dest={{ qcow2_image_dst_dir }}/{{ vm_name }}/hostname
+  
+  - name: Copy hostname file
+    command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} copy-in {{ qcow2_image_dst_dir }}/{{ vm_name }}/hostname /etc/
+  
+  - name: Remove temporary copy of hostname file
+    file: path={{ qcow2_image_dst_dir }}/{{ vm_name }}/hostname state=absent
+  
+  - name: Set the owner and group for the hostname file
+    command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} chown 0 0 /etc/hostname
+  
+  #- name: Create the directory /root/.ssh for authorized_keys
+  #  command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} mkdir-mode /root/.ssh 0700
+  
+  - name: Set the owner and group for the /root/.ssh directory
+    command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} chown 0 0 /root/.ssh
+  
+  - name: Create a temporary copy of the authorized_keys file
+    template: src=authorized_keys.j2 backup=no dest={{ qcow2_image_dst_dir }}/{{ vm_name }}/authorized_keys
+  
+  - name: Copy authorized_keys file
+    command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} copy-in {{ qcow2_image_dst_dir }}/{{ vm_name }}/authorized_keys /root/.ssh/
+  
+  - name: Remove temporary copy of authorized_keys file
+    file: path={{ qcow2_image_dst_dir }}/{{ vm_name }}/authorized_keys state=absent
+  
+  - name: Set the owner and group for the authorized_keys file
+    command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} chown 0 0 /root/.ssh/authorized_keys
+  
+  - name: Set the mode for the authorized_keys file
+    command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} chmod 0640 /root/.ssh/authorized_keys
+  
+  - name: Deploy VM using virt-install
+    command: >
+      virt-install --connect qemu:///system -n {{ vm_name }}
+      -r {{ vm_ram }} --os-type=linux --os-variant=rhel7
+      --disk path={{ guestfish_dest }},device=disk,bus=virtio,format=qcow2
+      --vcpus={{ vm_cpu }} --graphics vnc,listen=0.0.0.0
+      -w bridge={{ vm_bridge }} --noautoconsole --import
+  
+  - name: Autostart
+    shell: virsh autostart {{ vm_name }}
 
-- name: Debug skipping message if QCOW2 exists
-  debug:
-    msg: "Skipping copy — QCOW2 image already exists."
-  when: qcow2_image_stat.stat.exists
-
-- name: Set local variable in guestfish destination
-  set_fact:
-    guestfish_dest: "{{ qcow2_image_dst_dir }}/{{ vm_name }}/{{ vm_name }}.qcow2"
-
-- name: Get the public key for the current user
-  local_action: command cat "{{ user_ssh_pub_key }}"
-  register: current_user_ssh_key
-
-- name: Get list of partitions
-  shell: "guestfish -r -a {{ guestfish_dest }} run : list-filesystems | grep -Ev '(unknown|swap)'"
-  register: partitions_list
-
-- name: Check partition content
-  shell: "guestfish -r -a {{ guestfish_dest }} run : mount {{ item.split(':')[0] }} / : ls /"
-  register: partitions
-  with_items: "{{ partitions_list.stdout_lines }}"
-
-
-- name: Find root partition
-  set_fact:
-    guestfish_mount: "{{ item.item.split(':')[0]}}"
-  with_items: "{{ partitions.results }}"
-  when: '"proc" in item.stdout'
-
-- name: Set persistent interface name via udev rule using guestfish
-  shell: |
-    guestfish --rw -a {{ guestfish_dest }} -i <<EOF
-    mkdir-p /etc/udev/rules.d
-    write /etc/udev/rules.d/76-custom-net.rules 'SUBSYSTEM=="net", ACTION=="add", NAME="enp1s0"'
-    EOF
-
-- name: Create a temporary copy of the network script for {{ deployer_vm_interface }}
-  template: src=ifcfg-{{ deployer_vm_interface }}.j2 backup=no dest={{ qcow2_image_dst_dir }}/{{ vm_name }}/ifcfg-{{ deployer_vm_interface }}
-
-- name: Copy {{ deployer_vm_interface }} network script file
-  command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} copy-in {{ qcow2_image_dst_dir }}/{{ vm_name }}/ifcfg-{{ deployer_vm_interface }} /etc/sysconfig/network-scripts/
-
-- name: Remove temporary copy of {{ deployer_vm_interface }} network script
-  file: path={{ qcow2_image_dst_dir }}/{{ vm_name }}/ifcfg-{{ deployer_vm_interface }} state=absent
-
-- name: Set the owner and group on the {{ deployer_vm_interface }} network script file
-  command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} chown 0 0 /etc/sysconfig/network-scripts/ifcfg-{{ deployer_vm_interface }}
-
-- name: Create a temporary copy of the syscfg network file
-  template: src=network.j2 backup=no dest={{ qcow2_image_dst_dir }}/{{ vm_name }}/network
-
-- name: Copy network file to the deployer image
-  command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} copy-in {{ qcow2_image_dst_dir }}/{{ vm_name }}/network /etc/sysconfig/
-
-- name: Remove temporary copy of network file
-  file: path={{ qcow2_image_dst_dir }}/{{ vm_name }}/network state=absent
-
-- name: Set the owner and group for the network hostname file
-  command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} chown 0 0 /etc/sysconfig/network
-
-- name: Create a temporary copy of the hostname file
-  template: src=hostname.j2 backup=no dest={{ qcow2_image_dst_dir }}/{{ vm_name }}/hostname
-
-- name: Copy hostname file
-  command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} copy-in {{ qcow2_image_dst_dir }}/{{ vm_name }}/hostname /etc/
-
-- name: Remove temporary copy of hostname file
-  file: path={{ qcow2_image_dst_dir }}/{{ vm_name }}/hostname state=absent
-
-- name: Set the owner and group for the hostname file
-  command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} chown 0 0 /etc/hostname
-
-#- name: Create the directory /root/.ssh for authorized_keys
-#  command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} mkdir-mode /root/.ssh 0700
-
-- name: Set the owner and group for the /root/.ssh directory
-  command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} chown 0 0 /root/.ssh
-
-- name: Create a temporary copy of the authorized_keys file
-  template: src=authorized_keys.j2 backup=no dest={{ qcow2_image_dst_dir }}/{{ vm_name }}/authorized_keys
-
-- name: Copy authorized_keys file
-  command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} copy-in {{ qcow2_image_dst_dir }}/{{ vm_name }}/authorized_keys /root/.ssh/
-
-- name: Remove temporary copy of authorized_keys file
-  file: path={{ qcow2_image_dst_dir }}/{{ vm_name }}/authorized_keys state=absent
-
-- name: Set the owner and group for the authorized_keys file
-  command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} chown 0 0 /root/.ssh/authorized_keys
-
-- name: Set the mode for the authorized_keys file
-  command: guestfish --rw -a {{ guestfish_dest }} -m {{ guestfish_mount }} chmod 0640 /root/.ssh/authorized_keys
-
-- name: Deploy VM using virt-install
-  command: >
-    virt-install --connect qemu:///system -n {{ vm_name }}
-    -r {{ vm_ram }} --os-type=linux --os-variant=rhel7
-    --disk path={{ guestfish_dest }},device=disk,bus=virtio,format=qcow2
-    --vcpus={{ vm_cpu }} --graphics vnc,listen=0.0.0.0
-    -w bridge={{ vm_bridge }} --noautoconsole --import
-
-- name: Autostart
-  shell: virsh autostart {{ vm_name }}
-
-#- name: Destroy Deployer VM
-#  shell: |
-#    virsh destroy {{ vm_name }} || true
-#    virsh undefine {{ vm_name }} --remove-all-storage || true
-#  tags: delete_deployer
-
+  delegate_to: "{{ target_server }}"
+  remote_user: "{{ target_server_username }}"

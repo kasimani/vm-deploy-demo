@@ -13,6 +13,6 @@ vm_bridge: br0
 vm_network: "default"
 target_server: 10.58.8.5
 target_server_username: root
-libvirt_user: qemu
-libvirt_group: qemu
-
+libvirt_user: root
+libvirt_group: root
+ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
